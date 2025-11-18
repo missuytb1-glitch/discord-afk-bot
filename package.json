@@ -1,17 +1,14 @@
 {
   "name": "discord-afk-bot",
   "version": "1.0.0",
-  "description": "Discord AFK bot 24/7",
+  "description": "Discord AFK 24/7 bot",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
-  "engines": {
-    "node": "20.x"
-  },
   "dependencies": {
     "@discordjs/voice": "^0.17.2",
     "discord.js": "^14.15.3",
-    "express": "^4.18.2",
+    "express": "^4.18.2"
   }
 }
