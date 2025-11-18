@@ -76,7 +76,7 @@ client.on("interactionCreate", async (interaction) => {
       });
 
       await interaction.reply(
-        `Oke sen, aku sudah join **${voiceChannel.name}** dan bakal AFK di sini 😴`
+        `Yow!! Gw udah join **${voiceChannel.name}** dan bakal AFK di sini selamanya!!😴`
       );
     } catch (error) {
       console.error("Error waktu join voice:", error);
