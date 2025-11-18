@@ -168,8 +168,10 @@ client.on("interactionCreate", async (interaction) => {
           guildId: guildId,
           adapterCreator: interaction.guild.voiceAdapterCreator,
           selfDeaf: false,
-          selfMute: false
+          selfMute: false,
+          encryption: "lite"
         });
+
       }
 
       const player = getOrCreatePlayer(guildId, connection);
@@ -190,8 +192,10 @@ client.on("interactionCreate", async (interaction) => {
           guildId: guildId,
           adapterCreator: interaction.guild.voiceAdapterCreator,
           selfDeaf: false,
-          selfMute: false
+          selfMute: false,
+          encryption: "lite"
         });
+
       }
 
       const player = getOrCreatePlayer(guildId, connection);
