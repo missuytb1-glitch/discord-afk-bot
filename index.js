@@ -14,12 +14,15 @@ const {
   createAudioResource,
   StreamType,
   AudioPlayerStatus,
-  getVoiceConnection
+  getVoiceConnection,
+  generateDependencyReport
 } = require("@discordjs/voice");
 
 const { Readable } = require("stream");
 
-// ==================== CONFIG DARI ENV ====================
+console.log(generateDependencyReport()); // debug encryption
+
+// ==================== CONFIG ENV ====================
 
 const TOKEN = process.env.TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
@@ -46,25 +49,43 @@ class Silence extends Readable {
   }
 }
 
-// guildId -> AudioPlayer
-const voicePlayers = new Map();
-// guildId -> "afk" | "sing" | "none"
-const playModes = new Map();
+// guild maps
+const voicePlayers = new Map(); // guildId -> AudioPlayer
+const playModes = new Map();    // guildId -> "afk" | "sing" | "none"
 
-// helper bikin resource
+// ==================== CREATE RESOURCES ====================
+
 function createSilenceResource() {
   return createAudioResource(new Silence(), {
     inputType: StreamType.Opus
   });
 }
 
-// ganti nama file ini kalau lagunya beda
 function createSongResource() {
-  // pastiin file ini ada di root project: song.mp3
-  return createAudioResource("song.mp3");
+  return createAudioResource("song.mp3"); // file harus ada di root
 }
 
-// bikin / ambil player per guild + set loop behavior
+// ==================== FIX: CONNECT FUNCTION ====================
+
+function connectToChannel(voiceChannel, guildId) {
+  const connection = joinVoiceChannel({
+    channelId: voiceChannel.id,
+    guildId,
+    adapterCreator: voiceChannel.guild.voiceAdapterCreator,
+    selfDeaf: false,
+    selfMute: false,
+    encryption: "lite" // FIX utama
+  });
+
+  connection.on("error", err => {
+    console.error("Voice connection error:", err);
+  });
+
+  return connection;
+}
+
+// ==================== GET OR CREATE PLAYER ====================
+
 function getOrCreatePlayer(guildId, connection) {
   let player = voicePlayers.get(guildId);
 
@@ -72,17 +93,23 @@ function getOrCreatePlayer(guildId, connection) {
     player = createAudioPlayer({
       behaviors: {
         noSubscriber: NoSubscriberBehavior.Play
-      }
+      },
+      preferredEncryptionMode: "lite" // FIX FIX FIX
     });
 
     voicePlayers.set(guildId, player);
-    connection.subscribe(player);
 
-    player.on("error", (err) => {
+    try {
+      connection.subscribe(player);
+    } catch (e) {
+      console.error("Subscribe error:", e);
+    }
+
+    player.on("error", err => {
       console.error(`Player error di guild ${guildId}:`, err);
     });
 
-    // loop sesuai mode
+    // Looping behaviour
     player.on(AudioPlayerStatus.Idle, () => {
       const mode = playModes.get(guildId);
 
@@ -91,11 +118,9 @@ function getOrCreatePlayer(guildId, connection) {
           player.play(createSongResource());
         } else if (mode === "afk") {
           player.play(createSilenceResource());
-        } else {
-          // mode "none" -> diem aja
         }
       } catch (err) {
-        console.error(`Error waktu handle Idle di guild ${guildId}:`, err);
+        console.error(`Idle event error di guild ${guildId}:`, err);
       }
     });
   }
@@ -108,15 +133,15 @@ function getOrCreatePlayer(guildId, connection) {
 const commands = [
   {
     name: "afk",
-    description: "Bot join ke voice kamu dan AFK 24/7 (silent loop)"
+    description: "Bot join ke voice kamu dan AFK 24/7."
   },
   {
     name: "sing",
-    description: "Bot nyanyi (muter song.mp3) dan loop terus sampai di /stop"
+    description: "Bot nyanyi (muter song.mp3) dan loop terus."
   },
   {
     name: "stop",
-    description: "Berhentiin semua suara (nyanyi/afk) di voice"
+    description: "Berhentiin semua suara / AFK."
   }
 ];
 
@@ -132,13 +157,13 @@ client.once("ready", async () => {
       Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID),
       { body: commands }
     );
-    console.log("✅ Slash command /afk, /sing, /stop terdaftar di guild.");
+    console.log("✨ Slash command /afk /sing /stop aktif.");
   } catch (error) {
     console.error("❌ Gagal register command:", error);
   }
 });
 
-// ==================== INTERACTION HANDLER ====================
+// ==================== INTERACTION ====================
 
 client.on("interactionCreate", async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
@@ -148,30 +173,22 @@ client.on("interactionCreate", async (interaction) => {
 
   console.log(`📥 Command: ${interaction.commandName} dari ${interaction.user.tag}`);
 
-  // semua command kecuali /stop butuh user di voice
+  // semua kecuali stop butuh di voice
   if (interaction.commandName !== "stop") {
     if (!voiceChannel) {
       return interaction.reply({
-        content: "Kamu harus lagi di voice channel dulu, sen 😆",
+        content: "Kamu harus di voice dulu sen 😆",
         ephemeral: true
       });
     }
   }
 
   try {
-    // ---------- /afk ----------
+    // ================ /afk ===================
     if (interaction.commandName === "afk") {
       let connection = getVoiceConnection(guildId);
       if (!connection) {
-        connection = joinVoiceChannel({
-          channelId: voiceChannel.id,
-          guildId: guildId,
-          adapterCreator: interaction.guild.voiceAdapterCreator,
-          selfDeaf: false,
-          selfMute: false,
-          encryption: "lite"
-        });
-
+        connection = connectToChannel(voiceChannel, guildId);
       }
 
       const player = getOrCreatePlayer(guildId, connection);
@@ -179,54 +196,49 @@ client.on("interactionCreate", async (interaction) => {
       player.play(createSilenceResource());
 
       await interaction.reply(
-        `Oke sen, aku udah join **${voiceChannel.name}** dan bakal AFK di sini 24/7 😴`
+        `Oke sen, aku udah AFK 24/7 di **${voiceChannel.name}** 😴`
       );
     }
 
-    // ---------- /sing ----------
+    // ================ /sing ===================
     if (interaction.commandName === "sing") {
       let connection = getVoiceConnection(guildId);
       if (!connection) {
-        connection = joinVoiceChannel({
-          channelId: voiceChannel.id,
-          guildId: guildId,
-          adapterCreator: interaction.guild.voiceAdapterCreator,
-          selfDeaf: false,
-          selfMute: false,
-          encryption: "lite"
-        });
-
+        connection = connectToChannel(voiceChannel, guildId);
       }
 
       const player = getOrCreatePlayer(guildId, connection);
       playModes.set(guildId, "sing");
       player.play(createSongResource());
 
-      await interaction.reply("Oke sen, aku lagi **nyanyi dan bakal loop terus** 🎵");
+      await interaction.reply(
+        `🎵 Oke sen, aku mulai **nyanyi** dan bakal loop terus!`
+      );
     }
 
-    // ---------- /stop ----------
+    // ================ /stop ===================
     if (interaction.commandName === "stop") {
       const player = voicePlayers.get(guildId);
       playModes.set(guildId, "none");
 
       if (player) {
         player.stop(true);
-        await interaction.reply("Oke, aku **berhenti nyanyi / AFK** dulu 😴");
+        await interaction.reply("👌 Oke sen, aku berhenti dulu.");
       } else {
         await interaction.reply({
-          content: "Aku lagi gak nyanyi / AFK di voice, sen 🤔",
+          content: "Aku lagi ga nyanyi / AFK kok sen 🤔",
           ephemeral: true
         });
       }
     }
+
   } catch (error) {
     console.error("🔥 Error di interaction handler:", error);
 
     if (!interaction.replied && !interaction.deferred) {
       try {
         await interaction.reply({
-          content: "Ada error waktu proses command ini 😭",
+          content: "Waduh ada error waktu proses 😭",
           ephemeral: true
         });
       } catch (e) {
