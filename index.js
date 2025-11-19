@@ -1,4 +1,17 @@
-require("libsodium-wrappers");
+// ==========================
+// INIT LIBSODIUM PROPERLY
+// ==========================
+const sodium = require("libsodium-wrappers");
+
+(async () => {
+  await sodium.ready;
+  console.log("Sodium initialized!");
+
+  startBot(); // mulai bot SETELAH sodium siap
+})();
+
+function startBot() {
+
 require("./server.js");
 
 const {
@@ -50,19 +63,19 @@ const players = new Map();
 const modes = new Map();
 
 // ==========================================
-// ANTI ERROR: SAFE REPLY
+// SUPER SAFE REPLY
 // ==========================================
 
 async function safeReply(interaction, options) {
   try {
-    if (interaction.replied || interaction.deferred) {
-      return await interaction.followUp(options);
-    } else {
+    if (!interaction.replied && !interaction.deferred) {
       return await interaction.reply(options);
+    } else {
+      return await interaction.followUp(options);
     }
   } catch (err) {
-    if (err.code === 10062) {
-      console.warn("Ignored Unknown Interaction (10062)");
+    if (err.code === 10062 || err.code === 40060) {
+      console.warn("Ignored interaction error:", err.code);
     } else {
       console.error("Reply error:", err);
     }
@@ -223,5 +236,9 @@ process.on("unhandledRejection", (reason) => {
 });
 
 // ==========================================
+// LOGIN DIPINDAH KE DALAM async sodium.ready
+// ==========================================
 
 client.login(TOKEN);
+
+} // END startBot()
