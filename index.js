@@ -1,4 +1,5 @@
 require("./server.js");
+require("libsodium-wrappers");
 
 const {
   Client,
