@@ -1,5 +1,5 @@
-require("./server.js");
 require("libsodium-wrappers");
+require("./server.js");
 
 const {
   Client,
@@ -50,6 +50,28 @@ const players = new Map();
 const modes = new Map();
 
 // ==========================================
+// ANTI ERROR: SAFE REPLY
+// ==========================================
+
+async function safeReply(interaction, options) {
+  try {
+    if (interaction.replied || interaction.deferred) {
+      return await interaction.followUp(options);
+    } else {
+      return await interaction.reply(options);
+    }
+  } catch (err) {
+    if (err.code === 10062) {
+      console.warn("Ignored Unknown Interaction (10062)");
+    } else {
+      console.error("Reply error:", err);
+    }
+  }
+}
+
+// ==========================================
+// CREATE PLAYER
+// ==========================================
 
 function getOrCreatePlayer(guildId, connection) {
   let player = players.get(guildId);
@@ -80,6 +102,8 @@ function getOrCreatePlayer(guildId, connection) {
 }
 
 // ==========================================
+// CLIENT
+// ==========================================
 
 const client = new Client({
   intents: [
@@ -108,6 +132,8 @@ client.once("ready", async () => {
 });
 
 // ==========================================
+// MAIN INTERACTION HANDLER
+// ==========================================
 
 client.on("interactionCreate", async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
@@ -116,7 +142,7 @@ client.on("interactionCreate", async (interaction) => {
   const vc = interaction.member.voice.channel;
 
   if (interaction.commandName !== "stop" && !vc) {
-    return interaction.reply({
+    return safeReply(interaction, {
       content: "Masuk voice dulu sen 😭❤️",
       ephemeral: true
     });
@@ -130,7 +156,9 @@ client.on("interactionCreate", async (interaction) => {
         conn = joinVoiceChannel({
           channelId: vc.id,
           guildId: guildId,
-          adapterCreator: interaction.guild.voiceAdapterCreator
+          adapterCreator: interaction.guild.voiceAdapterCreator,
+          selfMute: false,
+          selfDeaf: true
         });
       }
 
@@ -138,7 +166,9 @@ client.on("interactionCreate", async (interaction) => {
       modes.set(guildId, "afk");
       player.play(silenceResource());
 
-      return interaction.reply(`Aku AFK 24/7 di **${vc.name}** 😴`);
+      return safeReply(interaction, {
+        content: `Aku AFK 24/7 di **${vc.name}** 😴`
+      });
     }
 
     if (interaction.commandName === "sing") {
@@ -148,7 +178,9 @@ client.on("interactionCreate", async (interaction) => {
         conn = joinVoiceChannel({
           channelId: vc.id,
           guildId: guildId,
-          adapterCreator: interaction.guild.voiceAdapterCreator
+          adapterCreator: interaction.guild.voiceAdapterCreator,
+          selfMute: false,
+          selfDeaf: true
         });
       }
 
@@ -156,7 +188,9 @@ client.on("interactionCreate", async (interaction) => {
       modes.set(guildId, "sing");
       player.play(songResource());
 
-      return interaction.reply("🎤 Aku lagi nyanyi **song.mp3** buat kamu sen ❤️");
+      return safeReply(interaction, {
+        content: "🎤 Lagi nyanyi **song.mp3** buat kamu sen ❤️"
+      });
     }
 
     if (interaction.commandName === "stop") {
@@ -165,15 +199,29 @@ client.on("interactionCreate", async (interaction) => {
 
       if (player) player.stop(true);
 
-      return interaction.reply("Oke sen, aku berhenti dulu 😌");
+      return safeReply(interaction, {
+        content: "Oke sen, aku berhenti dulu 😌"
+      });
     }
 
   } catch (e) {
     console.error("Interaction error:", e);
-    if (!interaction.replied) {
-      interaction.reply({ content: "Error sen 😭", ephemeral: true }).catch(() => {});
-    }
+    safeReply(interaction, { content: "Error sen 😭", ephemeral: true });
   }
 });
+
+// ==========================================
+// GLOBAL ERROR HANDLER (ANTI MATI)
+// ==========================================
+
+client.on("error", (err) => {
+  console.error("Client error:", err);
+});
+
+process.on("unhandledRejection", (reason) => {
+  console.error("Unhandled Rejection:", reason);
+});
+
+// ==========================================
 
 client.login(TOKEN);
