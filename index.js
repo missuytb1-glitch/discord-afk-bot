@@ -6,8 +6,7 @@ const sodium = require("libsodium-wrappers");
 (async () => {
   await sodium.ready;
   console.log("Sodium initialized!");
-
-  startBot(); // mulai bot SETELAH sodium siap
+  startBot();
 })();
 
 function startBot() {
@@ -57,6 +56,10 @@ function songResource() {
   return createAudioResource("song.mp3");
 }
 
+function songPick(name) {
+  return createAudioResource(`${name}.mp3`);
+}
+
 // ==========================================
 
 const players = new Map();
@@ -91,9 +94,7 @@ function getOrCreatePlayer(guildId, connection) {
 
   if (!player) {
     player = createAudioPlayer({
-      behaviors: {
-        noSubscriber: NoSubscriberBehavior.Play
-      }
+      behaviors: { noSubscriber: NoSubscriberBehavior.Play }
     });
 
     connection.subscribe(player);
@@ -136,6 +137,16 @@ client.once("ready", async () => {
       body: [
         { name: "afk", description: "AFK 24/7" },
         { name: "sing", description: "Play song.mp3 (loop)" },
+
+        { name: "lagu1", description: "Putar song1.mp3" },
+        { name: "lagu2", description: "Putar song2.mp3" },
+        { name: "lagu3", description: "Putar song3.mp3" },
+        { name: "lagu4", description: "Putar song4.mp3" },
+        { name: "lagu5", description: "Putar song5.mp3" },
+
+        { name: "kocok", description: "Putar lagu acak" },
+        { name: "leave", description: "Keluarkan bot dari voice channel" },
+
         { name: "stop", description: "Stop audio" }
       ]
     }
@@ -154,7 +165,7 @@ client.on("interactionCreate", async (interaction) => {
   const guildId = interaction.guild.id;
   const vc = interaction.member.voice.channel;
 
-  if (interaction.commandName !== "stop" && !vc) {
+  if (interaction.commandName !== "stop" && interaction.commandName !== "leave" && !vc) {
     return safeReply(interaction, {
       content: "Masuk voice dulu sen 😭❤️",
       ephemeral: true
@@ -162,13 +173,16 @@ client.on("interactionCreate", async (interaction) => {
   }
 
   try {
+    // ===========================
+    // /afk
+    // ===========================
     if (interaction.commandName === "afk") {
       let conn = getVoiceConnection(guildId);
 
       if (!conn) {
         conn = joinVoiceChannel({
           channelId: vc.id,
-          guildId: guildId,
+          guildId,
           adapterCreator: interaction.guild.voiceAdapterCreator,
           selfMute: false,
           selfDeaf: true
@@ -184,13 +198,16 @@ client.on("interactionCreate", async (interaction) => {
       });
     }
 
+    // ===========================
+    // /sing
+    // ===========================
     if (interaction.commandName === "sing") {
       let conn = getVoiceConnection(guildId);
 
       if (!conn) {
         conn = joinVoiceChannel({
           channelId: vc.id,
-          guildId: guildId,
+          guildId,
           adapterCreator: interaction.guild.voiceAdapterCreator,
           selfMute: false,
           selfDeaf: true
@@ -206,6 +223,87 @@ client.on("interactionCreate", async (interaction) => {
       });
     }
 
+    // ===========================
+    // /lagu1 - /lagu5
+    // ===========================
+    const songMap = {
+      lagu1: "song1",
+      lagu2: "song2",
+      lagu3: "song3",
+      lagu4: "song4",
+      lagu5: "song5"
+    };
+
+    if (songMap[interaction.commandName]) {
+      let conn = getVoiceConnection(guildId);
+
+      if (!conn) {
+        conn = joinVoiceChannel({
+          channelId: vc.id,
+          guildId,
+          adapterCreator: interaction.guild.voiceAdapterCreator,
+          selfMute: false,
+          selfDeaf: true
+        });
+      }
+
+      const player = getOrCreatePlayer(guildId, conn);
+      modes.set(guildId, "sing");
+
+      const file = songMap[interaction.commandName];
+      player.play(songPick(file));
+
+      return safeReply(interaction, {
+        content: `🎶 Lagi play **${file}.mp3** buat kamu sen ❤️`
+      });
+    }
+
+    // ===========================
+    // /kocok (shuffle)
+    // ===========================
+    if (interaction.commandName === "kocok") {
+      const list = ["song1", "song2", "song3", "song4", "song5"];
+      const randomSong = list[Math.floor(Math.random() * list.length)];
+
+      let conn = getVoiceConnection(guildId);
+
+      if (!conn) {
+        conn = joinVoiceChannel({
+          channelId: vc.id,
+          guildId,
+          adapterCreator: interaction.guild.voiceAdapterCreator,
+          selfMute: false,
+          selfDeaf: true
+        });
+      }
+
+      const player = getOrCreatePlayer(guildId, conn);
+      modes.set(guildId, "sing");
+      player.play(songPick(randomSong));
+
+      return safeReply(interaction, {
+        content: `🔀 Kocok… dapet **${randomSong}.mp3** 😎🎵`
+      });
+    }
+
+    // ===========================
+    // /leave
+    // ===========================
+    if (interaction.commandName === "leave") {
+      const conn = getVoiceConnection(guildId);
+
+      modes.set(guildId, "none");
+
+      if (conn) conn.destroy();
+
+      return safeReply(interaction, {
+        content: "Oke sen, aku keluar dulu dari voice 😌👋"
+      });
+    }
+
+    // ===========================
+    // /stop
+    // ===========================
     if (interaction.commandName === "stop") {
       const player = players.get(guildId);
       modes.set(guildId, "none");
@@ -224,7 +322,7 @@ client.on("interactionCreate", async (interaction) => {
 });
 
 // ==========================================
-// GLOBAL ERROR HANDLER (ANTI MATI)
+// GLOBAL ERROR HANDLER
 // ==========================================
 
 client.on("error", (err) => {
@@ -236,7 +334,7 @@ process.on("unhandledRejection", (reason) => {
 });
 
 // ==========================================
-// LOGIN DIPINDAH KE DALAM async sodium.ready
+// LOGIN
 // ==========================================
 
 client.login(TOKEN);
