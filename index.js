@@ -32,14 +32,14 @@ const {
 
 const { Readable } = require("stream");
 
-// =================== CONFIG ===================
 
+// =================== CONFIG ===================
 const TOKEN = process.env.TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
 const GUILD_ID = process.env.GUILD_ID;
 
-// =================== SILENCE ===================
 
+// =================== SILENCE ===================
 class Silence extends Readable {
   _read() {
     this.push(Buffer.from([0xf8, 0xff, 0xfe]));
@@ -47,48 +47,36 @@ class Silence extends Readable {
 }
 
 function silenceResource() {
-  return createAudioResource(new Silence(), {
-    inputType: StreamType.Opus
-  });
-}
-
-function songResource() {
-  return createAudioResource("song.mp3");
+  return createAudioResource(new Silence(), { inputType: StreamType.Opus });
 }
 
 function songPick(name) {
   return createAudioResource(`${name}.mp3`);
 }
 
-// ==========================================
 
+// =================== STATE DATA ===================
 const players = new Map();
-const modes = new Map();
+const states = new Map(); 
+// states[guildId] = { mode, playlist, currentIndex }
 
-// ==========================================
-// SUPER SAFE REPLY
-// ==========================================
 
+// =================== SAFE REPLY ===================
 async function safeReply(interaction, options) {
   try {
-    if (!interaction.replied && !interaction.deferred) {
+    if (!interaction.replied && !interaction.deferred)
       return await interaction.reply(options);
-    } else {
+    else
       return await interaction.followUp(options);
-    }
+
   } catch (err) {
-    if (err.code === 10062 || err.code === 40060) {
-      console.warn("Ignored interaction error:", err.code);
-    } else {
-      console.error("Reply error:", err);
-    }
+    if (err.code === 10062 || err.code === 40060) return;
+    console.error("Reply error:", err);
   }
 }
 
-// ==========================================
-// CREATE PLAYER
-// ==========================================
 
+// =================== CREATE PLAYER ===================
 function getOrCreatePlayer(guildId, connection) {
   let player = players.get(guildId);
 
@@ -100,14 +88,32 @@ function getOrCreatePlayer(guildId, connection) {
     connection.subscribe(player);
 
     player.on(AudioPlayerStatus.Idle, () => {
-      const mode = modes.get(guildId);
-      if (mode === "sing") return player.play(songResource());
-      if (mode === "afk") return player.play(silenceResource());
+      const state = states.get(guildId);
+      if (!state) return;
+
+      // LOOP SINGLE SONG
+      if (state.mode === "single") {
+        const file = state.playlist[0];
+        return player.play(songPick(file));
+      }
+
+      // LOOP PLAYLIST 1→5→1→...
+      if (state.mode === "shuffleLoop") {
+        state.currentIndex++;
+        if (state.currentIndex >= state.playlist.length)
+          state.currentIndex = 0;
+
+        const file = state.playlist[state.currentIndex];
+        return player.play(songPick(file));
+      }
+
+      // AFK 
+      if (state.mode === "afk") {
+        return player.play(silenceResource());
+      }
     });
 
-    player.on("error", (err) => {
-      console.error("Player error:", err);
-    });
+    player.on("error", err => console.error("Player error:", err));
 
     players.set(guildId, player);
   }
@@ -115,10 +121,8 @@ function getOrCreatePlayer(guildId, connection) {
   return player;
 }
 
-// ==========================================
-// CLIENT
-// ==========================================
 
+// =================== CLIENT ===================
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -136,17 +140,15 @@ client.once("ready", async () => {
     {
       body: [
         { name: "afk", description: "AFK 24/7" },
-        { name: "sing", description: "Play song.mp3 (loop)" },
 
-        { name: "lagu1", description: "Putar song1.mp3" },
-        { name: "lagu2", description: "Putar song2.mp3" },
-        { name: "lagu3", description: "Putar song3.mp3" },
-        { name: "lagu4", description: "Putar song4.mp3" },
-        { name: "lagu5", description: "Putar song5.mp3" },
+        { name: "lagu1", description: "Putar song1.mp3 (loop)" },
+        { name: "lagu2", description: "Putar song2.mp3 (loop)" },
+        { name: "lagu3", description: "Putar song3.mp3 (loop)" },
+        { name: "lagu4", description: "Putar song4.mp3 (loop)" },
+        { name: "lagu5", description: "Putar song5.mp3 (loop)" },
 
-        { name: "kocok", description: "Putar lagu acak" },
-        { name: "leave", description: "Keluarkan bot dari voice channel" },
-
+        { name: "kocok", description: "Putar playlist song1→song5 loop" },
+        { name: "leave", description: "Keluarkan bot dari voice" },
         { name: "stop", description: "Stop audio" }
       ]
     }
@@ -155,17 +157,19 @@ client.once("ready", async () => {
   console.log("Commands registered ✔️");
 });
 
-// ==========================================
-// MAIN INTERACTION HANDLER
-// ==========================================
 
+// =================== INTERACTION HANDLER ===================
 client.on("interactionCreate", async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
 
   const guildId = interaction.guild.id;
   const vc = interaction.member.voice.channel;
 
-  if (interaction.commandName !== "stop" && interaction.commandName !== "leave" && !vc) {
+  if (
+    interaction.commandName !== "stop" &&
+    interaction.commandName !== "leave" &&
+    !vc
+  ) {
     return safeReply(interaction, {
       content: "Masuk voice dulu sen 😭❤️",
       ephemeral: true
@@ -173,12 +177,10 @@ client.on("interactionCreate", async (interaction) => {
   }
 
   try {
-    // ===========================
-    // /afk
-    // ===========================
+
+    // ---------- AFK ----------
     if (interaction.commandName === "afk") {
       let conn = getVoiceConnection(guildId);
-
       if (!conn) {
         conn = joinVoiceChannel({
           channelId: vc.id,
@@ -190,7 +192,8 @@ client.on("interactionCreate", async (interaction) => {
       }
 
       const player = getOrCreatePlayer(guildId, conn);
-      modes.set(guildId, "afk");
+
+      states.set(guildId, { mode: "afk", playlist: [], currentIndex: 0 });
       player.play(silenceResource());
 
       return safeReply(interaction, {
@@ -198,34 +201,8 @@ client.on("interactionCreate", async (interaction) => {
       });
     }
 
-    // ===========================
-    // /sing
-    // ===========================
-    if (interaction.commandName === "sing") {
-      let conn = getVoiceConnection(guildId);
 
-      if (!conn) {
-        conn = joinVoiceChannel({
-          channelId: vc.id,
-          guildId,
-          adapterCreator: interaction.guild.voiceAdapterCreator,
-          selfMute: false,
-          selfDeaf: true
-        });
-      }
-
-      const player = getOrCreatePlayer(guildId, conn);
-      modes.set(guildId, "sing");
-      player.play(songResource());
-
-      return safeReply(interaction, {
-        content: "🎤 Lagi nyanyi **song.mp3** buat kamu sen ❤️"
-      });
-    }
-
-    // ===========================
-    // /lagu1 - /lagu5
-    // ===========================
+    // ---------- /lagu1 – /lagu5 ----------
     const songMap = {
       lagu1: "song1",
       lagu2: "song2",
@@ -236,7 +213,6 @@ client.on("interactionCreate", async (interaction) => {
 
     if (songMap[interaction.commandName]) {
       let conn = getVoiceConnection(guildId);
-
       if (!conn) {
         conn = joinVoiceChannel({
           channelId: vc.id,
@@ -248,25 +224,27 @@ client.on("interactionCreate", async (interaction) => {
       }
 
       const player = getOrCreatePlayer(guildId, conn);
-      modes.set(guildId, "sing");
-
       const file = songMap[interaction.commandName];
+
+      states.set(guildId, {
+        mode: "single",
+        playlist: [file],
+        currentIndex: 0
+      });
+
       player.play(songPick(file));
 
       return safeReply(interaction, {
-        content: `🎶 Lagi play **${file}.mp3** buat kamu sen ❤️`
+        content: `🎶 Lagi nge-loop **${file}.mp3** nonstop buat kamu sen ❤️`
       });
     }
 
-    // ===========================
-    // /kocok (shuffle)
-    // ===========================
+
+    // ---------- /kocok (playlist loop 1→5→1→...) ----------
     if (interaction.commandName === "kocok") {
-      const list = ["song1", "song2", "song3", "song4", "song5"];
-      const randomSong = list[Math.floor(Math.random() * list.length)];
+      const playlist = ["song1", "song2", "song3", "song4", "song5"];
 
       let conn = getVoiceConnection(guildId);
-
       if (!conn) {
         conn = joinVoiceChannel({
           channelId: vc.id,
@@ -278,42 +256,48 @@ client.on("interactionCreate", async (interaction) => {
       }
 
       const player = getOrCreatePlayer(guildId, conn);
-      modes.set(guildId, "sing");
-      player.play(songPick(randomSong));
+
+      states.set(guildId, {
+        mode: "shuffleLoop",
+        playlist,
+        currentIndex: 0
+      });
+
+      player.play(songPick("song1"));
 
       return safeReply(interaction, {
-        content: `🔀 Kocok… dapet **${randomSong}.mp3** 😎🎵`
+        content: `🔁 Muter playlist **song1 → song5** terus balik song1 lagi ya sen ❤️`
       });
     }
 
-    // ===========================
-    // /leave
-    // ===========================
+
+    // ---------- /leave ----------
     if (interaction.commandName === "leave") {
       const conn = getVoiceConnection(guildId);
 
-      modes.set(guildId, "none");
+      states.delete(guildId);
 
       if (conn) conn.destroy();
 
       return safeReply(interaction, {
-        content: "Oke sen, aku keluar dulu dari voice 😌👋"
+        content: "Oke sen, aku keluar voice dulu 😌👋"
       });
     }
 
-    // ===========================
-    // /stop
-    // ===========================
+
+    // ---------- /stop ----------
     if (interaction.commandName === "stop") {
       const player = players.get(guildId);
-      modes.set(guildId, "none");
+
+      states.delete(guildId);
 
       if (player) player.stop(true);
 
       return safeReply(interaction, {
-        content: "Oke sen, aku berhenti dulu 😌"
+        content: "Oke sen, musiknya aku stop ya 😌"
       });
     }
+
 
   } catch (e) {
     console.error("Interaction error:", e);
@@ -321,22 +305,13 @@ client.on("interactionCreate", async (interaction) => {
   }
 });
 
-// ==========================================
-// GLOBAL ERROR HANDLER
-// ==========================================
 
-client.on("error", (err) => {
-  console.error("Client error:", err);
-});
+// =================== GLOBAL ERROR HANDLERS ===================
+client.on("error", err => console.error("Client error:", err));
+process.on("unhandledRejection", reason => console.error("Unhandled Rejection:", reason));
 
-process.on("unhandledRejection", (reason) => {
-  console.error("Unhandled Rejection:", reason);
-});
 
-// ==========================================
-// LOGIN
-// ==========================================
-
+// =================== LOGIN ===================
 client.login(TOKEN);
 
 } // END startBot()
